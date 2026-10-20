@@ -55,13 +55,37 @@ class User {
         });
     }
 
-    static async create({ displayName, email, passwordHash, role = 'STANDARD' }) {
+    static async saveOtp(userId, otpCode, expiresAt) {
+        return await prisma.user.update({
+            where: { userId },
+            data: {
+                otpCode,
+                otpExpiresAt: expiresAt
+            }
+        });
+    }
+
+    static async verifyUser(userId) {
+        return await prisma.user.update({
+            where: { userId },
+            data: {
+                isVerified: true,
+                otpCode: null,
+                otpExpiresAt: null
+            }
+        });
+    }
+
+    static async create({ displayName, email, passwordHash, role = 'STANDARD', otpCode, otpExpiresAt }) {
         return await prisma.user.create({
             data: {
                 displayName,
                 email: email.toLowerCase(),
                 passwordHash,
-                role
+                role,
+                otpCode,
+                otpExpiresAt,
+                isVerified: false
             },
             select: {
                 userId: true,

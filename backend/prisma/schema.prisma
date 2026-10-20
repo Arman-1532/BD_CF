@@ -16,6 +16,8 @@ model User {
   phone             String?         @map("phone_number") @db.VarChar(30)
   status            String          @default("active") @db.VarChar(30)
   isVerified        Boolean         @default(false) @map("is_verified")
+  otpCode           String?         @map("otp_code") @db.VarChar(10)
+  otpExpiresAt      DateTime?       @map("otp_expires_at") @db.DateTime
   verificationDoc   String?         @map("verification_doc") @db.VarChar(500)
   profilePhotoUrl   String?         @map("profile_photo_url") @db.VarChar(Max)
   bio               String?         @db.VarChar(Max)

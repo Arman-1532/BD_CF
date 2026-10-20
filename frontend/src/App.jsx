@@ -8,6 +8,7 @@ import AuthLayout from './layouts/AuthLayout';
 import HomePage from './pages/HomePage';
 import LoginForm from './components/auth/LoginForm';
 import SignupForm from './components/auth/SignupForm';
+import VerifyOtpForm from './components/auth/VerifyOtpForm';
 import UserDashboard from './pages/UserDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import CreateCampaignPage from './pages/CreateCampaignPage';
@@ -41,6 +42,7 @@ export default function App() {
                         <Route element={<AuthLayout />}>
                             <Route path="/login" element={<LoginForm />} />
                             <Route path="/signup" element={<SignupForm />} />
+                            <Route path="/verify-otp" element={<VerifyOtpForm />} />
                         </Route>
                     </Routes>
                 </BrowserRouter>

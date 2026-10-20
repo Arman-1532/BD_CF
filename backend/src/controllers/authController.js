@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/userModel');
+const emailService = require('../config/emailService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_jwt_key_change_in_production_12345';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'super_secret_refresh_key_change_in_production_12345';
@@ -23,6 +24,10 @@ const hashToken = (token) => {
     return crypto.createHash('sha256').update(token).digest('hex');
 };
 
+const generateOtp = () => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
 exports.register = async (req, res) => {
     try {
         const { displayName, email, password, role } = req.body;
@@ -36,6 +41,22 @@ exports.register = async (req, res) => {
         // Check if user exists
         const existingUser = await User.findByEmail(normalizedEmail);
         if (existingUser) {
+            if (!existingUser.isVerified) {
+                // If user registered but never verified, resend OTP and allow continuing verification
+                const otpCode = generateOtp();
+                const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+                await User.saveOtp(existingUser.userId, otpCode, otpExpiresAt);
+                try {
+                    await emailService.sendOtpEmail(normalizedEmail, otpCode, existingUser.displayName);
+                } catch (emailErr) {
+                    console.error('Failed to send resend OTP email during re-registration:', emailErr);
+                }
+                return res.status(200).json({
+                    message: 'An account with this email already exists but is unverified. A new OTP has been sent to your email.',
+                    requiresVerification: true,
+                    email: normalizedEmail
+                });
+            }
             return res.status(409).json({ error: 'User with this email already exists' });
         }
 
@@ -43,25 +64,79 @@ exports.register = async (req, res) => {
         const saltRounds = 10;
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
-        // Create user
+        // Generate OTP
+        const otpCode = generateOtp();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // Create user (unverified)
         const newUser = await User.create({
             displayName,
             email: normalizedEmail,
             passwordHash,
-            role: role && ['STANDARD', 'ADMIN'].includes(role) ? role : 'STANDARD'
+            role: role && ['STANDARD', 'ADMIN'].includes(role) ? role : 'STANDARD',
+            otpCode,
+            otpExpiresAt
         });
 
-        const { accessToken, refreshToken } = generateTokens(newUser);
-        
+        // Send OTP email
+        try {
+            await emailService.sendOtpEmail(normalizedEmail, otpCode, displayName);
+        } catch (emailErr) {
+            console.error('Failed to send OTP email:', emailErr);
+            // We still create the user, but inform them or log it
+        }
+
+        res.status(201).json({
+            message: 'Registration successful. Please check your email for the 6-digit verification code.',
+            requiresVerification: true,
+            email: normalizedEmail
+        });
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({ error: 'Internal server error during registration', details: error.message });
+    }
+};
+
+exports.verifyOtp = async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+
+        if (!email || !otp) {
+            return res.status(400).json({ error: 'Email and OTP are required' });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await User.findByEmail(normalizedEmail);
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({ error: 'Email is already verified. Please log in.' });
+        }
+
+        if (!user.otpCode || user.otpCode !== otp.trim()) {
+            return res.status(400).json({ error: 'Invalid verification code' });
+        }
+
+        if (user.otpExpiresAt && new Date() > new Date(user.otpExpiresAt)) {
+            return res.status(400).json({ error: 'Verification code has expired. Please request a new one.' });
+        }
+
+        // Mark user as verified
+        await User.verifyUser(user.userId);
+
+        const freshUser = await User.findById(user.userId);
+        const { accessToken, refreshToken } = generateTokens(freshUser);
+
         // Save refresh token hash
         const hashedRefreshToken = hashToken(refreshToken);
         const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-        await User.saveRefreshToken(newUser.userId, hashedRefreshToken, expiresAt);
+        await User.saveRefreshToken(freshUser.userId, hashedRefreshToken, expiresAt);
 
-        const freshUser = await User.findById(newUser.userId);
-
-        res.status(201).json({
-            message: 'User registered successfully',
+        res.json({
+            message: 'Email verified successfully! You are now logged in.',
             accessToken,
             refreshToken,
             user: {
@@ -76,8 +151,43 @@ exports.register = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ error: 'Internal server error during registration', details: error.message });
+        console.error('Verify OTP error:', error);
+        res.status(500).json({ error: 'Internal server error during OTP verification', details: error.message });
+    }
+};
+
+exports.resendOtp = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await User.findByEmail(normalizedEmail);
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({ error: 'Email is already verified' });
+        }
+
+        const otpCode = generateOtp();
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        await User.saveOtp(user.userId, otpCode, otpExpiresAt);
+        await emailService.sendOtpEmail(normalizedEmail, otpCode, user.displayName);
+
+        res.json({
+            message: 'A new verification code has been sent to your email.',
+            email: normalizedEmail
+        });
+    } catch (error) {
+        console.error('Resend OTP error:', error);
+        res.status(500).json({ error: 'Internal server error resending OTP', details: error.message });
     }
 };
 
@@ -109,6 +219,24 @@ exports.login = async (req, res) => {
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
         if (!isPasswordValid) {
             return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        if (!user.isVerified) {
+            // Generate and send a fresh OTP if not verified
+            const otpCode = generateOtp();
+            const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+            await User.saveOtp(user.userId, otpCode, otpExpiresAt);
+            try {
+                await emailService.sendOtpEmail(user.email, otpCode, user.displayName);
+            } catch (emailErr) {
+                console.error('Failed to send verification OTP on login:', emailErr);
+            }
+
+            return res.status(403).json({
+                error: 'Please verify your email address before logging in. A new verification code has been sent.',
+                requiresVerification: true,
+                email: user.email
+            });
         }
 
         const { accessToken, refreshToken } = generateTokens(user);

@@ -5,6 +5,8 @@ const { validate, registerSchema, loginSchema } = require('../middleware/validat
 const { authenticateToken } = require('../middleware/auth');
 
 router.post('/register', validate(registerSchema), authController.register);
+router.post('/verify-otp', authController.verifyOtp);
+router.post('/resend-otp', authController.resendOtp);
 router.post('/login', validate(loginSchema), authController.login);
 router.post('/refresh-token', authController.refreshToken);
 router.post('/logout', authController.logout);

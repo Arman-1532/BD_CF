@@ -1,9 +1,7 @@
-import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
+import { useNavigate, Link } from 'react-router-dom';
 import { HeartHandshake, Lock, Mail, User } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -14,9 +12,7 @@ const signupSchema = z.object({
 });
 
 export default function SignupForm() {
-    const { login } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
 
     const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
         resolver: zodResolver(signupSchema)
@@ -36,12 +32,8 @@ export default function SignupForm() {
                 throw new Error(resData.detail || resData.error || 'Registration failed');
             }
 
-            toast.success('Registration successful!');
-            login(resData.user, { accessToken: resData.accessToken, refreshToken: resData.refreshToken });
-            const targetPath = resData.user?.role === 'ADMIN' ? '/admin' : `/profile/${resData.user.userId}`;
-            setTimeout(() => {
-                window.location.href = targetPath;
-            }, 600);
+            toast.success(resData.message || 'Verification code sent to your email!');
+            navigate('/verify-otp', { state: { email: data.email } });
         } catch (err) {
             toast.error(err.message);
         }

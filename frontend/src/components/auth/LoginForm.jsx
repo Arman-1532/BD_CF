@@ -1,10 +1,9 @@
-import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { HeartHandshake, Lock, Mail, AlertCircle } from 'lucide-react';
+import { HeartHandshake, Lock, Mail } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const loginSchema = z.object({
@@ -15,7 +14,6 @@ const loginSchema = z.object({
 export default function LoginForm() {
     const { login } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
 
     const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm({
         resolver: zodResolver(loginSchema)
@@ -32,6 +30,11 @@ export default function LoginForm() {
             const resData = await response.json();
 
             if (!response.ok) {
+                if (resData.requiresVerification) {
+                    toast.error(resData.error || 'Email verification required');
+                    navigate('/verify-otp', { state: { email: data.email } });
+                    return;
+                }
                 throw new Error(resData.detail || resData.error || 'Authentication failed');
             }
 
@@ -56,7 +59,7 @@ export default function LoginForm() {
                 Welcome back to BDCF
             </h2>
             <p className="text-center text-sm text-slate-500 mb-8">
-                Don't have an account?{' '}
+                Don&apos;t have an account?{' '}
                 <Link
                     to="/signup"
                     className="font-bold text-emerald-600 hover:text-emerald-700 focus:outline-none underline"
